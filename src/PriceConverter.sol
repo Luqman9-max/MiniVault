@@ -14,10 +14,4 @@ library PriceConverter {
         uint256 totalAmount = (amount * pricePerToken) / 1e18;
         return totalAmount;
     }
-
-    function getTarget (uint256 target, AggregatorV3Interface s_priceFeed) internal view returns (uint256) {
-        uint256 pricePerTarget = getPrice(s_priceFeed);
-        uint256 totalTarget = (target * pricePerTarget) / 1e18;
-        return totalTarget;
-    }
 }

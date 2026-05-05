@@ -7,7 +7,11 @@ import {PriceConverter} from "./PriceConverter.sol";
 contract MiniVault {
     using PriceConverter for uint256;
 
-    // Custom errors (lebih hemat gas daripada require + string)
+    uint256 public constant MIN_USD = 5e18;
+
+    event Funded(address indexed user, uint256 amount, uint256 targetUsd);
+    event Withdrew(address indexed user, uint256 amount);
+
     error ZeroDeposit();
     error InvalidTarget();
     error NoBalance();
@@ -15,55 +19,65 @@ contract MiniVault {
     error TransferFailed();
     error NotEnoughDeposited();
 
-    AggregatorV3Interface private s_priceFeed;
-
-    uint256 public constant MIN_USD = 5e18;
-
+    AggregatorV3Interface public immutable s_priceFeed;
 
     mapping (address => uint256) public balance;
-    mapping (address => uint256) public targetPrice;
+    mapping (address => uint256) public _targetPrice;
 
-    event deposited (address indexed user, uint256 amount, uint256 _targetPrice);
-    event withdrawn (address indexed user, uint256 totalAmount);
+    modifier hasBalance () {
+        if (balance[msg.sender] == 0){
+            revert NoBalance ();
+        }
+        _;
+    }
 
     constructor (address priceFeed) {
         s_priceFeed = AggregatorV3Interface(priceFeed);
     }
 
-    function deposit (uint256 amountDeposited, uint256 _targetPrice) external payable {
-        if (amountDeposited.getValue(s_priceFeed) == 0e18) {
+    function deposit (uint256 _priceTarget) external payable {
+        uint256 usdValueSent = msg.value.getValue(s_priceFeed);
+
+        if (usdValueSent == 0e18) {
             revert ZeroDeposit();
-        } else if (amountDeposited.getValue(s_priceFeed) < MIN_USD) {
-            revert NotEnoughDeposited();
+        } else if (usdValueSent < MIN_USD){
+            revert NotEnoughDeposited ();
         }
 
-        if (_targetPrice.getTarget(s_priceFeed) <= 0e18) {
+        uint256 targetPrice = _priceTarget.getValue(s_priceFeed);
+
+        if (targetPrice == 0e18) {
             revert InvalidTarget();
         }
 
-        balance[msg.sender] += amountDeposited;
-        targetPrice[msg.sender] = _targetPrice;
-        
-        emit deposited (msg.sender, amountDeposited, _targetPrice);
+        balance[msg.sender] += msg.value;
+        _targetPrice[msg.sender] += targetPrice;
+
+        emit Funded(msg.sender, msg.value, targetPrice);
     }
 
-    function withdraw () external {
-        uint256 totalBalance = balance[msg.sender];
-        uint256 priceNow = PriceConverter.getPrice(s_priceFeed);
+    function withdraw () external hasBalance {
+        uint256 balanceWithdraw = balance[msg.sender];
 
-        if (totalBalance == 0e18) revert NoBalance();
-        if (priceNow < targetPrice[msg.sender]) revert PriceTooLow();
+        if (balanceWithdraw.getValue(s_priceFeed) < _targetPrice[msg.sender]){
+            revert PriceTooLow();
+        }
 
         balance[msg.sender] = 0;
-        targetPrice[msg.sender] = 0;
+        _targetPrice[msg.sender] = 0;
+ 
 
-        (bool success, ) = payable(msg.sender).call{value: totalBalance}("");
+        (bool success, ) = payable(msg.sender).call{value: balanceWithdraw}("");
         if (!success) revert TransferFailed();
 
-        emit withdrawn (msg.sender, totalBalance);
+        emit Withdrew(msg.sender, balanceWithdraw);
     }
 
-    function getBalance () external view returns (uint256) {
-        return balance[msg.sender];
+    function getBalance(address _user) external view returns (uint256) {
+        return balance[_user];
+    }
+
+    function getTargetPrice(address _user) external view returns (uint256) {
+        return _targetPrice[_user];
     }
 }
