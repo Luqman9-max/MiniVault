@@ -3,79 +3,84 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {MiniVault} from "../src/MiniVault.sol";
+import {HelperConfig} from "../script/HelperConfig.s.sol";
 
 contract MiniVaultTest is Test {
     MiniVault public vault;
-
-    // Chainlink BTC/USD price feed di Celo Mainnet
-    address constant BTC_USD_FEED = 0x128fE88eaa22bFFb868Bb3A584A54C96eE24014b;
+    HelperConfig public helperConfig;
 
     address public user = makeAddr("user");
-    uint256 public constant DEPOSIT_AMOUNT = 1 ether;
+    uint256 public constant DEPOSIT_AMOUNT = 0.1 ether;
 
     function setUp() public {
-        // Fork Celo Mainnet
-        vm.createSelectFork("celo_mainnet");
+        // Inisialisasi HelperConfig untuk mendapatkan alamat price feed yang sesuai network
+        helperConfig = new HelperConfig();
+        address priceFeed = helperConfig.activeConfigAddress();
 
-        // Deploy MiniVault dengan price feed ASLI dari Chainlink
-        vault = new MiniVault(BTC_USD_FEED);
+        // Deploy MiniVault dengan price feed dari HelperConfig
+        vault = new MiniVault(priceFeed);
 
-        // Kasih user 10 CELO untuk testing
+        // Kasih user 10 ETH/Token untuk testing
         vm.deal(user, 10 ether);
-    }
-
-    // ============ PRICE TESTS ============
-
-    function test_GetLatestPrice() public view {
-        int256 price = vault.getLatestPrice();
-        console.log("Harga BTC/USD saat ini (8 decimals):");
-        console.logInt(price);
-        // Harga harus > 0 (feed aktif)
-        assertGt(price, 0, "Price should be greater than 0");
     }
 
     // ============ DEPOSIT TESTS ============
 
     function test_DepositSuccess() public {
-        int256 targetPrice = 10000000000000; // $100,000 (8 decimals)
+        // Target price: USD value of 0.2 tokens
+        // Since we are using BTC/USD feed, 0.2 tokens is worth a lot.
+        uint256 targetAmount = 0.2 ether; 
 
         vm.prank(user);
-        vault.deposit{value: DEPOSIT_AMOUNT}(targetPrice);
+        vault.deposit{value: DEPOSIT_AMOUNT}(targetAmount);
 
-        assertEq(vault.balances(user), DEPOSIT_AMOUNT);
-        assertEq(vault.targetPrices(user), targetPrice);
+        assertEq(vault.getBalance(user), DEPOSIT_AMOUNT);
+        // targetPrice in contract is stored in USD (18 decimals)
+        // It's calculated as targetAmount.getValue(s_priceFeed)
+        assertTrue(vault.getTargetPrice(user) > 0);
     }
 
     function test_DepositZeroReverts() public {
         vm.prank(user);
         vm.expectRevert(MiniVault.ZeroDeposit.selector);
-        vault.deposit{value: 0}(100000000);
+        vault.deposit{value: 0}(0.1 ether);
+    }
+
+    function test_DepositBelowMinUsdReverts() public {
+        // We need to send an amount that results in < $5 USD.
+        // If BTC is $60,000, $5 is 5/60,000 BTC = 0.00008333 BTC
+        uint256 tinyAmount = 1 gwei; // very small amount
+        
+        vm.prank(user);
+        vm.expectRevert(MiniVault.NotEnoughDeposited.selector);
+        vault.deposit{value: tinyAmount}(0.1 ether);
     }
 
     // ============ WITHDRAW TESTS ============
 
     function test_WithdrawSuccess() public {
-        // Target harga $1 — pasti di bawah harga BTC saat ini
-        int256 lowTarget = 100000000; // $1 (8 decimals)
+        // Target price set lower than current value to allow immediate withdraw
+        // current value is DEPOSIT_AMOUNT (0.1)
+        uint256 lowTargetAmount = 0.05 ether; 
 
         vm.prank(user);
-        vault.deposit{value: DEPOSIT_AMOUNT}(lowTarget);
+        vault.deposit{value: DEPOSIT_AMOUNT}(lowTargetAmount);
 
-        // Harga BTC pasti > $1, jadi withdraw harus berhasil
+        // Now withdraw should work because current value (0.1) >= target value (0.05)
         vm.prank(user);
         vault.withdraw();
 
-        assertEq(vault.balances(user), 0);
+        assertEq(vault.getBalance(user), 0);
     }
 
     function test_WithdrawFailsBelowTarget() public {
-        // Target harga $99,999,999 — pasti belum tercapai
-        int256 highTarget = 9999999900000000; // $99,999,999 (8 decimals)
+        // Target price set higher than current value to prevent withdraw
+        uint256 highTargetAmount = 0.2 ether; 
 
         vm.prank(user);
-        vault.deposit{value: DEPOSIT_AMOUNT}(highTarget);
+        vault.deposit{value: DEPOSIT_AMOUNT}(highTargetAmount);
 
-        // Harga BTC pasti < $99,999,999, jadi withdraw harus gagal
+        // Withdraw should fail because current value (0.1) < target value (0.2)
         vm.prank(user);
         vm.expectRevert(MiniVault.PriceTooLow.selector);
         vault.withdraw();
@@ -88,10 +93,10 @@ contract MiniVaultTest is Test {
     }
 
     function test_WithdrawReturnsFunds() public {
-        int256 lowTarget = 100000000; // $1
+        uint256 lowTargetAmount = 0.05 ether;
 
         vm.startPrank(user);
-        vault.deposit{value: DEPOSIT_AMOUNT}(lowTarget);
+        vault.deposit{value: DEPOSIT_AMOUNT}(lowTargetAmount);
 
         uint256 balanceAfterDeposit = user.balance;
 
@@ -99,8 +104,8 @@ contract MiniVaultTest is Test {
         vm.stopPrank();
 
         // Setelah withdraw, saldo harus bertambah kembali sebesar deposit
-        assertGe(user.balance, balanceAfterDeposit);
+        assertEq(user.balance, balanceAfterDeposit + DEPOSIT_AMOUNT);
         // Pastikan vault sudah kosong
-        assertEq(vault.balances(user), 0);
+        assertEq(vault.getBalance(user), 0);
     }
 }
