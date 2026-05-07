@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import {Test, console} from "forge-std/Test.sol";
 import {MiniVault} from "../src/MiniVault.sol";
 import {DeployMiniVault} from "../script/DeployMiniVault.s.sol";
+import {MockV3Aggregator} from "./mocks/MockV3Aggregator.sol";
 
 contract MiniVaultTest is Test {
     MiniVault miniVault;
@@ -24,8 +25,8 @@ contract MiniVaultTest is Test {
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
-        assertEq(miniVault.getBalance(user), AMOUNT_USD);
-        assertTrue(miniVault.getTargetPrice(user) > 0);
+        assertEq(miniVault.getDepositInfo(user).amount, AMOUNT_USD);
+        assertTrue(miniVault.getDepositInfo(user).targetUsd > 0);
     }
 
     function test_DepositZeroReverts() public {
@@ -46,26 +47,41 @@ contract MiniVaultTest is Test {
     } 
 
     function test_WithdrawSuccess() public {
-        uint256 targetPrice = 0.05 ether;
+        uint256 targetPrice = 0.05 ether; // Low target
 
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
+        // Fast forward 1 day to pass time-lock
+        vm.warp(block.timestamp + 1 days + 1);
+        
+        // Refresh mock price feed to avoid StalePrice revert
+        MockV3Aggregator(address(miniVault.s_priceFeed())).updateAnswer(2000e8);
+
         vm.prank(user);
         miniVault.withdraw();
 
-        assertEq(miniVault.getBalance(user), 0);
+        assertEq(miniVault.getDepositInfo(user).amount, 0);
     }
 
-    function test_WithdrawFailsBelowTarget() public {
-        uint256 targetPrice = 5 ether;
+    function test_WithdrawWithPenalty() public {
+        uint256 targetPrice = 10 ether; // Very high target
 
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
         
-        vm.expectRevert(MiniVault.PriceTooLow.selector);
+        vm.warp(block.timestamp + 1 days + 1);
+        
+        // Refresh mock price feed
+        MockV3Aggregator(address(miniVault.s_priceFeed())).updateAnswer(2000e8);
+
+        uint256 balanceBefore = user.balance;
         vm.prank(user);
         miniVault.withdraw();
+
+        // Should have received 90% (10% penalty)
+        uint256 expectedReturn = (AMOUNT_USD * 90) / 100;
+        assertEq(user.balance, balanceBefore + expectedReturn);
     }
 
     function test_WithdrawNoBalanceReverts() public {
@@ -74,20 +90,15 @@ contract MiniVaultTest is Test {
         miniVault.withdraw();
     }
 
-    function test_WithdrawReturnsFunds() public {
+    function test_WithdrawLockedReverts() public {
         uint256 targetPrice = 0.1 ether;
 
-        vm.startPrank(user);
+        vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
-        uint256 afterDepositBalance = user.balance;
-
+        // No warp, should revert
+        vm.expectRevert(MiniVault.StillLocked.selector);
+        vm.prank(user);
         miniVault.withdraw();
-        vm.stopPrank();
-
-        assertEq(user.balance, afterDepositBalance + AMOUNT_USD);
-
-        assertEq(miniVault.getBalance(user), 0);
-
     }
 }
