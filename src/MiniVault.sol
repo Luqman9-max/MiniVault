@@ -6,12 +6,7 @@ import {PriceConverter} from "./PriceConverter.sol";
 
 contract MiniVault {
     using PriceConverter for uint256;
-
-    struct DepositInfo {
-        uint256 amount;
-        uint256 targetUsd;
-        uint256 depositTimestamp;
-    }
+    using PriceConverter for AggregatorV3Interface;
 
     uint256 public constant MIN_USD = 5e18;
     uint256 public immutable i_minLockDuration;
@@ -33,21 +28,15 @@ contract MiniVault {
 
     AggregatorV3Interface public immutable s_priceFeed;
 
-    mapping(address => DepositInfo) public s_deposits;
+    mapping (address => depositInfo) public addressToDepositInfo;
 
-    modifier hasBalance() {
-        if (s_deposits[msg.sender].amount == 0) {
-            revert NoBalance();
-        }
-        _;
+    struct depositInfo {
+        uint256 amount;
+        uint256 targetAmount;
+        uint256 timeStamp;
     }
 
-    modifier onlyOwner() {
-        if (msg.sender != i_owner) revert NotOwner();
-        _;
-    }
-
-    constructor(
+    constructor (
         address priceFeed,
         uint256 minLockDuration,
         uint256 penaltyPercentage,
@@ -60,76 +49,96 @@ contract MiniVault {
         i_owner = msg.sender;
     }
 
-    function deposit(uint256 _priceTarget) external payable {
+    modifier onlyOwner () {
+        if (msg.sender != i_owner) {
+            revert NotOwner();
+        }
+        _;
+    }
+
+    modifier hasBalance () {
+        if (addressToDepositInfo[msg.sender].amount == 0e18){
+            revert NoBalance();
+        }
+        _;
+    }
+
+    function deposit (uint256 target) external payable {
         uint256 usdValueSent = msg.value.getValue(s_priceFeed);
 
-        if (usdValueSent == 0e18) {
+        if (usdValueSent == 0e18){
             revert ZeroDeposit();
         } else if (usdValueSent < MIN_USD) {
             revert NotEnoughDeposited();
         }
 
-        uint256 targetPrice = _priceTarget.getValue(s_priceFeed);
+        uint256 usdTargetSet = target.getValue(s_priceFeed);
 
-        if (targetPrice == 0e18) {
+        if (usdTargetSet == 0e18) {
             revert InvalidTarget();
         }
 
-        s_deposits[msg.sender].amount += msg.value;
-        s_deposits[msg.sender].targetUsd += targetPrice;
-        s_deposits[msg.sender].depositTimestamp = block.timestamp;
+        addressToDepositInfo[msg.sender].amount += msg.value;
+        addressToDepositInfo[msg.sender].targetAmount += usdTargetSet;
+        addressToDepositInfo[msg.sender].timeStamp = block.timestamp;
 
-        emit Funded(msg.sender, msg.value, targetPrice);
+        emit Funded (msg.sender, msg.value, target);
     }
 
-    function withdraw() external hasBalance {
-        DepositInfo memory userDeposit = s_deposits[msg.sender];
+    function withdraw () external hasBalance {
+        depositInfo memory userInfo = addressToDepositInfo[msg.sender];
 
-        // 1. Time-lock check
-        if (block.timestamp < userDeposit.depositTimestamp + i_minLockDuration) {
+        if (block.timestamp < userInfo.timeStamp + i_minLockDuration) {
             revert StillLocked();
         }
 
-        // 2. Oracle Safety Check (Stale Price)
-        (, int256 price,, uint256 updatedAt,) = s_priceFeed.latestRoundData();
+        (,int256 price,,uint256 updatedAt,) = s_priceFeed.latestRoundData();
+        uint256 currentPrice = uint256(price) * 1e10;
+        uint256 totalPrice = (currentPrice * userInfo.amount) / 1e18;
+
+        uint256 totalAmountUsd = userInfo.amount;
+        bool earlyExit = false; 
+
         if (block.timestamp - updatedAt > i_stalePriceThreshold) {
             revert StalePrice();
         }
 
-        uint256 currentEthPrice = uint256(price) * 1e10; // Adjust to 18 decimals
-        uint256 currentUsdValue = (userDeposit.amount * currentEthPrice) / 1e18;
+        if (totalPrice < userInfo.targetAmount) {
+            uint256 penalty = (totalAmountUsd * i_penaltyPercentage) / 100;
 
-        uint256 amountToWithdraw = userDeposit.amount;
-        bool earlyExit = false;
-
-        // 3. Price Target & Penalty Logic
-        if (currentUsdValue < userDeposit.targetUsd) {
-            // Early exit with penalty
-            uint256 penalty = (amountToWithdraw * i_penaltyPercentage) / 100;
-            amountToWithdraw -= penalty;
+            totalAmountUsd -= penalty;
             earlyExit = true;
 
-            // Send penalty to owner
-            (bool ownerSuccess,) = i_owner.call{value: penalty}("");
+            (bool ownerSuccess, ) = i_owner.call{value: penalty}("");
             if (!ownerSuccess) revert TransferFailed();
         }
 
-        // Reset state
-        delete s_deposits[msg.sender];
+        delete addressToDepositInfo[msg.sender];
 
-        (bool success,) = payable(msg.sender).call{value: amountToWithdraw}("");
+        (bool success, ) = payable(msg.sender).call{value: totalAmountUsd}("");
         if (!success) revert TransferFailed();
 
-        emit Withdrew(msg.sender, amountToWithdraw, earlyExit);
+        emit Withdrew (msg.sender, totalAmountUsd, earlyExit);
     }
 
-    function getDepositInfo(address _user) external view returns (DepositInfo memory) {
-        return s_deposits[_user];
+    function getDepositInfo (address user) external view returns (depositInfo memory) {
+        return addressToDepositInfo[user];
     }
 
-    // New function for owner to withdraw accumulated fees
-    function withdrawFees() external onlyOwner {
-        (bool success,) = i_owner.call{value: address(this).balance}("");
+    function withdrawFees () external onlyOwner {
+        (bool success, ) = i_owner.call{value: address(this).balance}("");
         if (!success) revert TransferFailed();
     }
-}
+
+    function getCurrentPrice () external view returns (uint256) {
+        return s_priceFeed.getPrice();
+    }
+
+    function getVersionConfig () external view returns (uint256) {
+        return s_priceFeed.version();
+    }
+
+    function getAddressToAmountDeposit (address user) external view returns (uint256) {
+        return addressToDepositInfo[user].amount;
+    }
+} 

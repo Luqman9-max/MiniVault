@@ -8,7 +8,7 @@ import {MiniVault} from "../src/MiniVault.sol";
 contract DeployMiniVault is Script {
     function run () public returns (MiniVault) {
         HelperConfig helperConfig = new HelperConfig();
-        
+
         (
             address priceFeed,
             uint256 minLockDuration,

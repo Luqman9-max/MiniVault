@@ -26,7 +26,7 @@ contract MiniVaultTest is Test {
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
         assertEq(miniVault.getDepositInfo(user).amount, AMOUNT_USD);
-        assertTrue(miniVault.getDepositInfo(user).targetUsd > 0);
+        assertTrue(miniVault.getDepositInfo(user).targetAmount > 0);
     }
 
     function test_DepositZeroReverts() public {
