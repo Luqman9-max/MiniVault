@@ -7,12 +7,22 @@ import {MiniVault} from "../src/MiniVault.sol";
 
 contract DeployMiniVault is Script {
     function run () public returns (MiniVault) {
-        MiniVault miniVault;
         HelperConfig helperConfig = new HelperConfig();
-        address miniAddress = helperConfig.activeConfigAddress();
+        
+        (
+            address priceFeed,
+            uint256 minLockDuration,
+            uint256 penaltyPercentage,
+            uint256 stalePriceThreshold
+        ) = helperConfig.activeNetworkConfig();
 
         vm.startBroadcast();
-        miniVault = new MiniVault(miniAddress);
+        MiniVault miniVault = new MiniVault(
+            priceFeed,
+            minLockDuration,
+            penaltyPercentage,
+            stalePriceThreshold
+        );
         vm.stopBroadcast();
 
         return miniVault;

@@ -5,46 +5,61 @@ import {Script} from "forge-std/Script.sol";
 import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
 
 contract HelperConfig is Script {
-    configAddress public activeConfigAddress;
+    NetworkConfig public activeNetworkConfig;
 
     uint8 public constant DECIMAL = 8;
     int256 public constant INITIAL_ANSWER = 2000e8;
 
-    struct configAddress {
+    struct NetworkConfig {
         address priceFeed;
+        uint256 minLockDuration;
+        uint256 penaltyPercentage;
+        uint256 stalePriceThreshold;
     }
 
     constructor () {
         if (block.chainid == 11155111) {
-            activeConfigAddress = sepoliaConfigAddress();
+            activeNetworkConfig = sepoliaConfig();
         } else if (block.chainid == 1) {
-            activeConfigAddress = ethConfigAddress();
+            activeNetworkConfig = ethConfig();
         } else {
-            activeConfigAddress = mocksConfigAddress();
+            activeNetworkConfig = mocksConfig();
         }
     }
 
-    function sepoliaConfigAddress () public pure returns (configAddress memory) {
-        configAddress memory sepoliaAddress = configAddress({priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306});
-        return sepoliaAddress;
+    function sepoliaConfig () public pure returns (NetworkConfig memory) {
+        return NetworkConfig({
+            priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
+            minLockDuration: 1 days,
+            penaltyPercentage: 10,
+            stalePriceThreshold: 3600
+        });
     }
 
-    function ethConfigAddress () public pure returns (configAddress memory) {
-        configAddress memory ethAddress = configAddress ({priceFeed: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419});
-        return ethAddress;
+    function ethConfig () public pure returns (NetworkConfig memory) {
+        return NetworkConfig({
+            priceFeed: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419,
+            minLockDuration: 1 days,
+            penaltyPercentage: 10,
+            stalePriceThreshold: 3600
+        });
     }
 
-    function mocksConfigAddress () public returns (configAddress memory) {
-        if (activeConfigAddress.priceFeed != address(0)){
-            return activeConfigAddress;
+    function mocksConfig () public returns (NetworkConfig memory) {
+        if (activeNetworkConfig.priceFeed != address(0)){
+            return activeNetworkConfig;
         }
 
         vm.startBroadcast();
-        MockV3Aggregator mockAdress = new MockV3Aggregator(DECIMAL, INITIAL_ANSWER);
+        MockV3Aggregator mockAddress = new MockV3Aggregator(DECIMAL, INITIAL_ANSWER);
         vm.stopBroadcast();
 
-        configAddress memory mockConfig = configAddress({priceFeed: address(mockAdress)});
-        return mockConfig;
+        return NetworkConfig({
+            priceFeed: address(mockAddress),
+            minLockDuration: 1 days,
+            penaltyPercentage: 10,
+            stalePriceThreshold: 3600
+        });
     }
 
 }
