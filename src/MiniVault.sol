@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {PriceConverter} from "./PriceConverter.sol";
+import {VaultToken} from "./VaultToken.sol";
 
 /** 
  * @title MiniVault
@@ -36,8 +37,14 @@ contract MiniVault {
     /// @notice Alamat pemilik Contract
     address public immutable i_owner;
 
+    /// @notice Token hadiah untuk pengguna
+    VaultToken public immutable i_rewardToken;
+
+    /// @notice Besarnya hadiah dasar per detik (0.001 VAULT)
+    uint256 public constant REWARD_PER_SECOND = 1e15;
+
     event Funded(address indexed user, uint256 amount, uint256 targetUsd);
-    event Withdrew(address indexed user, uint256 amount, bool earlyExit);
+    event Withdrew(address indexed user, uint256 amount, bool earlyExit, uint256 rewardAmount);
 
     error ZeroDeposit();
     error InvalidTarget();
@@ -62,17 +69,20 @@ contract MiniVault {
      * @param minLockDuration Durasi kunci minimal
      * @param penaltyPercentage Persentase penalti
      * @param stalePriceThreshold Threshold harga basi
+     * @param rewardToken Alamat token hadiah
      */
     constructor (
         address priceFeed,
         uint256 minLockDuration,
         uint256 penaltyPercentage,
-        uint256 stalePriceThreshold
+        uint256 stalePriceThreshold,
+        address rewardToken
     ) {
         s_priceFeed = AggregatorV3Interface(priceFeed);
         i_minLockDuration = minLockDuration;
         i_penaltyPercentage = penaltyPercentage;
         i_stalePriceThreshold = stalePriceThreshold;
+        i_rewardToken = VaultToken(rewardToken);
         i_owner = msg.sender;
     }
 
@@ -122,6 +132,7 @@ contract MiniVault {
     /**
      * @notice Menarik dana dari brankas
      * @dev Cek keamanan (Time-lock & Stale Price). Jika harga di bawah target, kena penalti.
+     * Pengguna juga mendapatkan hadiah VaultToken.
      */
     function withdraw () external hasBalance {
         depositInfo memory userInfo = addressToDepositInfo[msg.sender];
@@ -144,21 +155,33 @@ contract MiniVault {
         uint256 totalAmountToTransfer = userInfo.amount;
         bool earlyExit = false; 
 
-        // 3. Cek Target & Penalti
+        // 3. Hitung Hadiah Token (Yield)
+        uint256 duration = block.timestamp - userInfo.timeStamp;
+        uint256 rewardAmount = duration * REWARD_PER_SECOND;
+
+        // 4. Cek Target & Penalti
         if (totalPrice < userInfo.targetAmount) {
             uint256 penalty = (totalAmountToTransfer * i_penaltyPercentage) / 100;
 
             totalAmountToTransfer -= penalty;
             s_accumulatedFees += penalty; 
             earlyExit = true;
+        } else {
+            // BONUS: Jika target tercapai, hadiah token dikali 2
+            rewardAmount = rewardAmount * 2;
         }
 
         delete addressToDepositInfo[msg.sender];
 
+        // Mint token hadiah ke pengguna
+        if (rewardAmount > 0) {
+            i_rewardToken.mint(msg.sender, rewardAmount);
+        }
+
         (bool success, ) = payable(msg.sender).call{value: totalAmountToTransfer}("");
         if (!success) revert TransferFailed();
 
-        emit Withdrew (msg.sender, totalAmountToTransfer, earlyExit);
+        emit Withdrew (msg.sender, totalAmountToTransfer, earlyExit, rewardAmount);
     }
 
     /// @notice Mendapatkan info deposit user
@@ -189,4 +212,4 @@ contract MiniVault {
     function getAddressToAmountDeposit (address user) external view returns (uint256) {
         return addressToDepositInfo[user].amount;
     }
-} 
+}

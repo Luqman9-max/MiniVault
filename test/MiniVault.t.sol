@@ -52,16 +52,20 @@ contract MiniVaultTest is Test {
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
-        // Fast forward 1 day to pass time-lock
-        vm.warp(block.timestamp + 1 days + 1);
+        // Fast forward 1 day
+        vm.warp(block.timestamp + 1 days);
         
-        // Refresh mock price feed to avoid StalePrice revert
         MockV3Aggregator(address(miniVault.s_priceFeed())).updateAnswer(2000e8);
 
         vm.prank(user);
         miniVault.withdraw();
 
         assertEq(miniVault.getDepositInfo(user).amount, 0);
+        
+        // Reward per second is 1e15. 1 day = 86400s. Total = 86400 * 1e15 = 8.64e19
+        // Target reached, reward is doubled: 17.28e19
+        uint256 expectedReward = (1 days * miniVault.REWARD_PER_SECOND()) * 2;
+        assertEq(miniVault.i_rewardToken().balanceOf(user), expectedReward);
     }
 
     function test_WithdrawWithPenalty() public {
