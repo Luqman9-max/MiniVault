@@ -149,10 +149,8 @@ contract MiniVault {
             uint256 penalty = (totalAmountToTransfer * i_penaltyPercentage) / 100;
 
             totalAmountToTransfer -= penalty;
-            s_accumulatedFees += penalty; // CATAT PENALTI KE DALAM FEE
+            s_accumulatedFees += penalty; 
             earlyExit = true;
-
-            // Kita tidak perlu langsung kirim ke owner di sini agar lebih hemat gas
         }
 
         delete addressToDepositInfo[msg.sender];
@@ -171,7 +169,7 @@ contract MiniVault {
     /// @notice Owner menarik dana penalti yang terkumpul (hanya fee, bukan deposit user)
     function withdrawFees () external onlyOwner {
         uint256 fees = s_accumulatedFees;
-        s_accumulatedFees = 0; // Reset catatan fee sebelum dikirim (mencegah reentrancy)
+        s_accumulatedFees = 0; 
 
         (bool success, ) = payable(i_owner).call{value: fees}("");
         if (!success) revert TransferFailed();
