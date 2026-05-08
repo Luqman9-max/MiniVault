@@ -4,14 +4,36 @@ pragma solidity ^0.8.19;
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {PriceConverter} from "./PriceConverter.sol";
 
+/** 
+ * @title MiniVault
+ * @author Luqman Adiwidya
+ * @notice Kontrak ini adalah brankas sederhana yang memungkinkan pengguna menyimpan ETH dengan target harga.
+ * @dev Kontrak ini menggunakan orakel Chainlink untuk verifikasi harga dan implementasi keamanan orakel.
+ */
 contract MiniVault {
     using PriceConverter for uint256;
     using PriceConverter for AggregatorV3Interface;
 
+    /// @notice Informasi deposit setiap pengguna
+    struct depositInfo {
+        uint256 amount;        // Jumlah ETH dalam wei
+        uint256 targetAmount;  // Target harga dalam USD (18 desimal)
+        uint256 timeStamp;     // Waktu deposit (Unix timestamp)
+    }
+
+    /// @notice Minimal deposit dalam USD (18 desimal)
     uint256 public constant MIN_USD = 5e18;
+    
+    /// @dev Waktu kunci dana minimal (detik)
     uint256 public immutable i_minLockDuration;
+    
+    /// @dev Besar penalti jika ditarik sebelum target (0-100)
     uint256 public immutable i_penaltyPercentage;
+    
+    /// @dev Toleransi waktu orakel agar tidak dianggap basi (detik)
     uint256 public immutable i_stalePriceThreshold;
+    
+    /// @notice Alamat pemilik kontrak
     address public immutable i_owner;
 
     event Funded(address indexed user, uint256 amount, uint256 targetUsd);
@@ -26,16 +48,18 @@ contract MiniVault {
     error StillLocked();
     error NotOwner();
 
+    /// @dev Antarmuka orakel Chainlink
     AggregatorV3Interface public immutable s_priceFeed;
 
+    /// @notice Data deposit yang dipetakan ke alamat pengguna
     mapping (address => depositInfo) public addressToDepositInfo;
 
-    struct depositInfo {
-        uint256 amount;
-        uint256 targetAmount;
-        uint256 timeStamp;
-    }
-
+    /**
+     * @param priceFeed Alamat orakel ETH/USD
+     * @param minLockDuration Durasi kunci minimal
+     * @param penaltyPercentage Persentase penalti
+     * @param stalePriceThreshold Threshold harga basi
+     */
     constructor (
         address priceFeed,
         uint256 minLockDuration,
@@ -49,6 +73,7 @@ contract MiniVault {
         i_owner = msg.sender;
     }
 
+    /// @dev Modifier untuk membatasi akses hanya pemilik
     modifier onlyOwner () {
         if (msg.sender != i_owner) {
             revert NotOwner();
@@ -56,13 +81,19 @@ contract MiniVault {
         _;
     }
 
+    /// @dev Modifier untuk memastikan pengguna memiliki saldo
     modifier hasBalance () {
-        if (addressToDepositInfo[msg.sender].amount == 0e18){
+        if (addressToDepositInfo[msg.sender].amount == 0){
             revert NoBalance();
         }
         _;
     }
 
+    /**
+     * @notice Pengguna menyimpan ETH dan menetapkan target harga USD
+     * @param target Target harga ETH dalam USD (tanpa desimal, misal: 2500)
+     * @dev Menyimpan jumlah asli ETH (wei) dan nilai USD dari target yang diinginkan
+     */
     function deposit (uint256 target) external payable {
         uint256 usdValueSent = msg.value.getValue(s_priceFeed);
 
@@ -78,35 +109,43 @@ contract MiniVault {
             revert InvalidTarget();
         }
 
-        addressToDepositInfo[msg.sender].amount += usdValueSent;
+        addressToDepositInfo[msg.sender].amount += msg.value;
         addressToDepositInfo[msg.sender].targetAmount += usdTargetSet;
         addressToDepositInfo[msg.sender].timeStamp = block.timestamp;
 
-        emit Funded (msg.sender, usdValueSent, usdTargetSet);
+        emit Funded (msg.sender, msg.value, usdTargetSet);
     }
 
+    /**
+     * @notice Menarik dana dari brankas
+     * @dev Cek keamanan (Time-lock & Stale Price). Jika harga di bawah target, kena penalti.
+     */
     function withdraw () external hasBalance {
         depositInfo memory userInfo = addressToDepositInfo[msg.sender];
 
+        // 1. Cek Time-lock
         if (block.timestamp < userInfo.timeStamp + i_minLockDuration) {
             revert StillLocked();
         }
 
+        // 2. Cek Orakel (Safety Check)
         (,int256 price,,uint256 updatedAt,) = s_priceFeed.latestRoundData();
-        uint256 currentPrice = uint256(price) * 1e10;
-        uint256 totalPrice = (currentPrice * userInfo.amount) / 1e18;
-
-        uint256 totalAmountUsd = userInfo.amount;
-        bool earlyExit = false; 
-
+        
         if (block.timestamp - updatedAt > i_stalePriceThreshold) {
             revert StalePrice();
         }
 
-        if (totalPrice < userInfo.targetAmount) {
-            uint256 penalty = (totalAmountUsd * i_penaltyPercentage) / 100;
+        uint256 currentPrice = uint256(price) * 1e10;
+        uint256 totalPrice = (currentPrice * userInfo.amount) / 1e18;
 
-            totalAmountUsd -= penalty;
+        uint256 totalAmountToTransfer = userInfo.amount;
+        bool earlyExit = false; 
+
+        // 3. Cek Target & Penalti
+        if (totalPrice < userInfo.targetAmount) {
+            uint256 penalty = (totalAmountToTransfer * i_penaltyPercentage) / 100;
+
+            totalAmountToTransfer -= penalty;
             earlyExit = true;
 
             (bool ownerSuccess, ) = i_owner.call{value: penalty}("");
@@ -115,29 +154,34 @@ contract MiniVault {
 
         delete addressToDepositInfo[msg.sender];
 
-        (bool success, ) = payable(msg.sender).call{value: totalAmountUsd}("");
+        (bool success, ) = payable(msg.sender).call{value: totalAmountToTransfer}("");
         if (!success) revert TransferFailed();
 
-        emit Withdrew (msg.sender, totalAmountUsd, earlyExit);
+        emit Withdrew (msg.sender, totalAmountToTransfer, earlyExit);
     }
 
+    /// @notice Mendapatkan info deposit user
     function getDepositInfo (address user) external view returns (depositInfo memory) {
         return addressToDepositInfo[user];
     }
 
+    /// @notice Owner mengambil dana penalti yang terkumpul
     function withdrawFees () external onlyOwner {
         (bool success, ) = i_owner.call{value: address(this).balance}("");
         if (!success) revert TransferFailed();
     }
 
+    /// @notice Mendapatkan harga ETH/USD saat ini
     function getCurrentPrice () external view returns (uint256) {
         return s_priceFeed.getPrice();
     }
 
+    /// @notice Mendapatkan versi orakel
     function getVersionConfig () external view returns (uint256) {
         return s_priceFeed.version();
     }
 
+    /// @notice Mendapatkan saldo deposit pengguna
     function getAddressToAmountDeposit (address user) external view returns (uint256) {
         return addressToDepositInfo[user].amount;
     }
