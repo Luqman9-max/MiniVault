@@ -54,6 +54,9 @@ contract MiniVault {
     /// @notice Data deposit yang dipetakan ke alamat pengguna
     mapping (address => depositInfo) public addressToDepositInfo;
 
+    /// @notice Total biaya penalti yang terkumpul dan bisa ditarik oleh owner
+    uint256 public s_accumulatedFees;
+
     /**
      * @param priceFeed Alamat Oracle ETH/USD
      * @param minLockDuration Durasi kunci minimal
@@ -146,10 +149,10 @@ contract MiniVault {
             uint256 penalty = (totalAmountToTransfer * i_penaltyPercentage) / 100;
 
             totalAmountToTransfer -= penalty;
+            s_accumulatedFees += penalty; // CATAT PENALTI KE DALAM FEE
             earlyExit = true;
 
-            (bool ownerSuccess, ) = payable(i_owner).call{value: penalty}("");
-            if (!ownerSuccess) revert TransferFailed();
+            // Kita tidak perlu langsung kirim ke owner di sini agar lebih hemat gas
         }
 
         delete addressToDepositInfo[msg.sender];
@@ -165,9 +168,12 @@ contract MiniVault {
         return addressToDepositInfo[user];
     }
 
-    /// @notice Owner mengambil dana penalti yang terkumpul
+    /// @notice Owner menarik dana penalti yang terkumpul (hanya fee, bukan deposit user)
     function withdrawFees () external onlyOwner {
-        (bool success, ) = i_owner.call{value: address(this).balance}("");
+        uint256 fees = s_accumulatedFees;
+        s_accumulatedFees = 0; // Reset catatan fee sebelum dikirim (mencegah reentrancy)
+
+        (bool success, ) = payable(i_owner).call{value: fees}("");
         if (!success) revert TransferFailed();
     }
 
