@@ -11,7 +11,7 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 library PriceConverter {
     /**
      * @notice Mendapatkan harga ETH/USD terbaru.
-     * @param s_priceFeed Antarmuka orakel Chainlink.
+     * @param s_priceFeed Antarmuka Oracle Chainlink.
      * @return Harga ETH dalam USD (18 desimal).
      */
     function getPrice (AggregatorV3Interface s_priceFeed) internal view returns (uint256) {
@@ -22,7 +22,7 @@ library PriceConverter {
     /**
      * @notice Menghitung nilai USD dari sejumlah ETH.
      * @param amount Jumlah ETH dalam wei.
-     * @param s_priceFeed Antarmuka orakel Chainlink.
+     * @param s_priceFeed Antarmuka Oracle Chainlink.
      * @return Nilai total dalam USD (18 desimal).
      */
     function getValue (uint256 amount, AggregatorV3Interface s_priceFeed) internal view returns (uint256) {
