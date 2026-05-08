@@ -78,11 +78,11 @@ contract MiniVault {
             revert InvalidTarget();
         }
 
-        addressToDepositInfo[msg.sender].amount += msg.value;
+        addressToDepositInfo[msg.sender].amount += usdValueSent;
         addressToDepositInfo[msg.sender].targetAmount += usdTargetSet;
         addressToDepositInfo[msg.sender].timeStamp = block.timestamp;
 
-        emit Funded (msg.sender, msg.value, target);
+        emit Funded (msg.sender, usdValueSent, usdTargetSet);
     }
 
     function withdraw () external hasBalance {
