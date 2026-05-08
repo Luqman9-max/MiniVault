@@ -7,8 +7,8 @@ import {PriceConverter} from "./PriceConverter.sol";
 /** 
  * @title MiniVault
  * @author Luqman Adiwidya
- * @notice Kontrak ini adalah brankas sederhana yang memungkinkan pengguna menyimpan ETH dengan target harga.
- * @dev Kontrak ini menggunakan orakel Chainlink untuk verifikasi harga dan implementasi keamanan orakel.
+ * @notice Contract ini adalah brankas sederhana yang memungkinkan pengguna menyimpan ETH dengan target harga.
+ * @dev Contract ini menggunakan Oracle Chainlink untuk verifikasi harga dan implementasi keamanan Oracle.
  */
 contract MiniVault {
     using PriceConverter for uint256;
@@ -30,10 +30,10 @@ contract MiniVault {
     /// @dev Besar penalti jika ditarik sebelum target (0-100)
     uint256 public immutable i_penaltyPercentage;
     
-    /// @dev Toleransi waktu orakel agar tidak dianggap basi (detik)
+    /// @dev Toleransi waktu Oracle agar tidak dianggap basi (detik)
     uint256 public immutable i_stalePriceThreshold;
     
-    /// @notice Alamat pemilik kontrak
+    /// @notice Alamat pemilik Contract
     address public immutable i_owner;
 
     event Funded(address indexed user, uint256 amount, uint256 targetUsd);
@@ -48,14 +48,14 @@ contract MiniVault {
     error StillLocked();
     error NotOwner();
 
-    /// @dev Antarmuka orakel Chainlink
+    /// @dev Antarmuka Oracle Chainlink
     AggregatorV3Interface public immutable s_priceFeed;
 
     /// @notice Data deposit yang dipetakan ke alamat pengguna
     mapping (address => depositInfo) public addressToDepositInfo;
 
     /**
-     * @param priceFeed Alamat orakel ETH/USD
+     * @param priceFeed Alamat Oracle ETH/USD
      * @param minLockDuration Durasi kunci minimal
      * @param penaltyPercentage Persentase penalti
      * @param stalePriceThreshold Threshold harga basi
@@ -128,7 +128,7 @@ contract MiniVault {
             revert StillLocked();
         }
 
-        // 2. Cek Orakel (Safety Check)
+        // 2. Cek Oracle (Safety Check)
         (,int256 price,,uint256 updatedAt,) = s_priceFeed.latestRoundData();
         
         if (block.timestamp - updatedAt > i_stalePriceThreshold) {
@@ -148,7 +148,7 @@ contract MiniVault {
             totalAmountToTransfer -= penalty;
             earlyExit = true;
 
-            (bool ownerSuccess, ) = i_owner.call{value: penalty}("");
+            (bool ownerSuccess, ) = payable(i_owner).call{value: penalty}("");
             if (!ownerSuccess) revert TransferFailed();
         }
 
@@ -176,7 +176,7 @@ contract MiniVault {
         return s_priceFeed.getPrice();
     }
 
-    /// @notice Mendapatkan versi orakel
+    /// @notice Mendapatkan versi Oracle
     function getVersionConfig () external view returns (uint256) {
         return s_priceFeed.version();
     }
