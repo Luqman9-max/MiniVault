@@ -212,4 +212,18 @@ contract MiniVault {
     function getAddressToAmountDeposit (address user) external view returns (uint256) {
         return addressToDepositInfo[user].amount;
     }
+
+    /**
+    * @dev Jika user kirim ETH langsung, otomatis arahkan ke fungsi deposit
+    */
+    receive() external payable {
+        deposit(""); // Memanggil fungsi deposit dengan pesan kosong
+    }
+    
+    /**
+    * @dev Jika user memanggil fungsi yang salah, tetap arahkan ke deposit
+    */
+    fallback() external payable {
+        deposit("");
+    }
 }
