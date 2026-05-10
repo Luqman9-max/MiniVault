@@ -107,7 +107,7 @@ contract MiniVault {
      * @param target Target harga ETH dalam USD (tanpa desimal, misal: 2500)
      * @dev Menyimpan jumlah asli ETH (wei) dan nilai USD dari target yang diinginkan
      */
-    function deposit (uint256 target) external payable {
+    function deposit (uint256 target) public payable {
         uint256 usdValueSent = msg.value.getValue(s_priceFeed);
 
         if (usdValueSent == 0e18){
@@ -217,13 +217,13 @@ contract MiniVault {
     * @dev Jika user kirim ETH langsung, otomatis arahkan ke fungsi deposit
     */
     receive() external payable {
-        deposit(""); // Memanggil fungsi deposit dengan pesan kosong
+        deposit(0); // Memanggil fungsi deposit dengan pesan kosong
     }
-    
+
     /**
     * @dev Jika user memanggil fungsi yang salah, tetap arahkan ke deposit
     */
     fallback() external payable {
-        deposit("");
+        deposit(0);
     }
 }

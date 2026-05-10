@@ -46,46 +46,44 @@ contract MiniVaultTest is Test {
         miniVault.deposit{value: amount}(targetPrice);
     } 
 
-    function test_WithdrawSuccess() public {
-        uint256 targetPrice = 0.05 ether; // Low target
+    function test_withdrawSuccess () public {
+        uint256 targetPrice = 0.01 ether;
 
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
 
-        // Fast forward 1 day
         vm.warp(block.timestamp + 1 days);
-        
+
         MockV3Aggregator(address(miniVault.s_priceFeed())).updateAnswer(2000e8);
 
         vm.prank(user);
         miniVault.withdraw();
 
         assertEq(miniVault.getDepositInfo(user).amount, 0);
-        
-        // Reward per second is 1e15. 1 day = 86400s. Total = 86400 * 1e15 = 8.64e19
-        // Target reached, reward is doubled: 17.28e19
+
         uint256 expectedReward = (1 days * miniVault.REWARD_PER_SECOND()) * 2;
+
         assertEq(miniVault.i_rewardToken().balanceOf(user), expectedReward);
     }
 
-    function test_WithdrawWithPenalty() public {
-        uint256 targetPrice = 10 ether; // Very high target
+    function test_withdrawPenalties () public {
+        uint256 targetPrice = 10 ether;
 
         vm.prank(user);
         miniVault.deposit{value: AMOUNT_USD}(targetPrice);
-        
+
         vm.warp(block.timestamp + 1 days + 1);
-        
-        // Refresh mock price feed
+
         MockV3Aggregator(address(miniVault.s_priceFeed())).updateAnswer(2000e8);
 
-        uint256 balanceBefore = user.balance;
+        uint256 beforeWithdraw = user.balance;
+
         vm.prank(user);
         miniVault.withdraw();
 
-        // Should have received 90% (10% penalty)
-        uint256 expectedReturn = (AMOUNT_USD * 90) / 100;
-        assertEq(user.balance, balanceBefore + expectedReturn);
+        uint256 expectedWithdraw = (AMOUNT_USD * 90) / 100;
+
+        assertEq(user.balance, beforeWithdraw + expectedWithdraw);
     }
 
     function test_WithdrawNoBalanceReverts() public {
